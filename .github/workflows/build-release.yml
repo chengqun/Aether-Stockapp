@@ -1,0 +1,106 @@
+name: Build & Release from private source
+
+# 此 workflow 住在 public 空壳仓库 Rethink/Aether-Stockapp。
+# 它从私有的 Aether 源仓 clone 源码 → 三平台构建 → 把二进制附件发到自己(public)的 Release。
+# 外人只能下载二进制,永远摸不到源码。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 创建 Release + 上传附件(本仓库)
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: stockapp-macos-x64
+            glob: dist/Aether-Stockapp-*-macos-x64.zip
+          - os: ubuntu-latest
+            artifact: stockapp-linux-x64
+            glob: dist/Aether-Stockapp-*-linux-x64.tar.gz
+          - os: windows-latest
+            artifact: stockapp-win-x64
+            glob: dist/Aether-Stockapp-*-win-x64.zip
+    env:
+      APP_VERSION_NAME: ${{ github.ref_name }}
+    steps:
+      # 源仓:私有 Aether。用 PAT 走 https clone(tag 触发时用源仓的 tag 名)。
+      # workflow_dispatch(无 tag)时回退源仓默认分支。
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: chengqun/Aether
+          token: ${{ secrets.AETHER_SOURCE_TOKEN }}
+          ref: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          path: aether
+          # 不带 submodules:true —— MAF 是 full-history 巨型子模块且 NuGet 包即可,不需要;FlaUI-MCP 同理。
+
+      - name: Shallow-init Lean submodule
+        shell: bash
+        working-directory: aether
+        run: git submodule update --init --depth 1 externals/Lean
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # shell 字段不支持 matrix 上下文,按 runner.os 分步、各用字面 shell。
+      - name: Run build script (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: aether
+        run: bash scripts/build-stockapp-macos.sh
+
+      - name: Run build script (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: aether
+        run: bash scripts/build-stockapp-linux.sh
+
+      - name: Run build script (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: aether
+        run: "& ./scripts/build-stockapp-windows.ps1"
+
+      - name: Zip macOS .app bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: aether
+        run: ditto -c -k --keepParent "dist/Aether-Stockapp.app" "dist/Aether-Stockapp-${APP_VERSION_NAME}-macos-x64.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: aether/${{ matrix.glob }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Create Release & attach assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: assets/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
