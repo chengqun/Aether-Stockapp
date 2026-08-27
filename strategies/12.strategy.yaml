@@ -1,0 +1,26 @@
+params:
+- key: FastPeriod
+  label: 快线周期
+  default: 5
+- key: SlowPeriod
+  label: 慢线周期
+  default: 20
+indicators:
+  fast:
+    type: sma
+    period: '{FastPeriod}'
+  slow:
+    type: sma
+    period: '{SlowPeriod}'
+rules:
+- signal: Long
+  when:
+    cross_above:
+    - ''
+    - ''
+- signal: Flat
+  when:
+    cross_below:
+    - ''
+    - ''
+default: Hold

@@ -1,0 +1,22 @@
+id: d24a3211-326a-431d-a994-3bab7dcdb900
+name: 1
+description: ''
+category: 规则
+tools: []
+memory: Off
+maxHistory: 20
+noMatchReply: 无匹配规则
+maxSteps: 20
+capture: 读(.+)
+steps:
+- name: 读取文件
+  match:
+    maxToolCalls: 0
+  action:
+    tool: ReadFile
+    args:
+      filePath: '{user.1}'
+- match:
+    minToolCalls: 1
+  action:
+    replyText: '{result}'
