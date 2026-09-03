@@ -1,7 +1,7 @@
 name: Build & Release from private source
 
 # 此 workflow 住在 public 空壳仓库 Rethink/Aether-Stockapp。
-# 它从私有的 Aether 源仓 clone 源码 → 三平台构建 → 把二进制附件发到自己(public)的 Release。
+# 它从私有的 Aether 源仓 clone 源码 → 三平台桌面构建 + Android APK → 把二进制附件发到自己(public)的 Release。
 # 外人只能下载二进制,永远摸不到源码。
 
 on:
@@ -86,9 +86,56 @@ jobs:
           path: aether/${{ matrix.glob }}
           if-no-files-found: error
 
+  build-android:
+    name: Build Android
+    runs-on: ubuntu-latest
+    env:
+      APP_VERSION_NAME: ${{ github.ref_name }}
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: chengqun/Aether
+          token: ${{ secrets.AETHER_SOURCE_TOKEN }}
+          ref: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          path: aether
+          # Stockapp.Mobile 不引 externals/Lean,无需 init 子模块(桌面端 job 才需要)。
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # 仅装 platform-tools + build-tools;MAUI 构建按需补 platform/api-level。
+          packages: 'platform-tools build-tools;36.0.0'
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install MAUI Android workload
+        run: dotnet workload install maui-android
+
+      - name: Run build script
+        shell: bash
+        working-directory: aether
+        run: bash scripts/build-stockapp-android.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stockapp-android
+          path: aether/dist/android-apk/Aether-Stockapp-android-*.apk
+          if-no-files-found: error
+
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, build-android]   # 桌面端三平台 + Android 全绿才发版
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
